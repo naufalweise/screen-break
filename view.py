@@ -1,63 +1,11 @@
-import time
-import threading
-from Foundation import NSObject, NSTimer, NSRunLoop, NSDate
+from Foundation import NSObject
 from AppKit import (
-    NSApplication, NSApp, NSWindow, NSScreen, 
-    NSColor, NSFont, NSTextField, NSSecureTextField,
-    NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-    NSCenterTextAlignment, NSFocusRingTypeNone
+    NSWindow, NSScreen, NSColor, NSFont, NSTextField, 
+    NSSecureTextField, NSWindowStyleMaskBorderless, 
+    NSBackingStoreBuffered, NSCenterTextAlignment, 
+    NSFocusRingTypeNone, NSApp, NSSound
 )
-from PyObjCTools import AppHelper
 
-# ==========================================
-# CONFIGURATION CONSTANTS
-# ==========================================
-WORK_DURATION_MIN = 1
-BREAK_DURATION_SEC = 60
-PASSWORD = "sjflajfljajf;s-032rn"
-
-# ==========================================
-# MODEL: Data and Business Logic
-# ==========================================
-class BreakModel:
-    def __init__(self):
-        self.work_duration_sec = WORK_DURATION_MIN * 60
-        self.break_idle_duration_sec = BREAK_DURATION_SEC
-        self.password = PASSWORD
-        
-        self.is_break_active = False
-        self.work_start_time = 0.0
-        self.last_activity_time = 0.0
-
-    def start_work(self):
-        self.is_break_active = False
-        self.work_start_time = time.time()
-
-    def start_break(self):
-        self.is_break_active = True
-        self.reset_activity_timer()
-
-    def reset_activity_timer(self):
-        self.last_activity_time = time.time()
-
-    def get_remaining_work_time(self):
-        elapsed = time.time() - self.work_start_time
-        return max(0, self.work_duration_sec - elapsed)
-
-    def get_remaining_break_time(self):
-        idle_time = time.time() - self.last_activity_time
-        return max(0, self.break_idle_duration_sec - idle_time)
-
-    def is_break_complete(self):
-        return self.get_remaining_break_time() <= 0
-
-    def validate_password(self, input_pwd):
-        return input_pwd == self.password
-
-
-# ==========================================
-# VIEW: Cocoa Overlay & Status
-# ==========================================
 class BreakWindow(NSWindow):
     def canBecomeKeyWindow(self):
         return True
@@ -75,15 +23,24 @@ class BreakView(NSObject):
             self.password_field = None
             self.break_timer_label = None
             self.work_timer_label = None
+            
+            # Pre-load native sounds
+            self.start_sound = NSSound.soundNamed_("Glass")
+            self.end_sound = NSSound.soundNamed_("Hero")
+            
         return self
 
+    def playStartSound(self):
+        if self.start_sound: self.start_sound.play()
+
+    def playEndSound(self):
+        if self.end_sound: self.end_sound.play()
+
     def showStatusWindow(self):
-        """Shows a small floating window with the remaining screen time."""
         if self.status_window: return
         
         screen_frame = NSScreen.mainScreen().frame()
-        # Position at top right
-        width, height = 200, 40
+        width, height = 220, 40
         rect = ((screen_frame.size.width - width - 20, screen_frame.size.height - height - 40), (width, height))
         
         self.status_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -95,7 +52,7 @@ class BreakView(NSObject):
         self.status_window.setCanHide_(False)
         
         self.work_timer_label = NSTextField.alloc().initWithFrame_(((0, 0), (width, height)))
-        self.work_timer_label.setStringValue_("Screen Time: --:--")
+        self.work_timer_label.setStringValue_("Ready to Start")
         self.work_timer_label.setFont_(NSFont.systemFontOfSize_(14))
         self.work_timer_label.setTextColor_(NSColor.whiteColor())
         self.work_timer_label.setEditable_(False)
@@ -111,7 +68,6 @@ class BreakView(NSObject):
             self.work_timer_label.setStringValue_(text)
 
     def showOverlay(self):
-        """Shows the fullscreen break overlay."""
         if self.status_window:
             self.status_window.orderOut_(None)
             self.status_window = None
@@ -129,7 +85,6 @@ class BreakView(NSObject):
         
         content_view = self.overlay_window.contentView()
         
-        # Title
         title = NSTextField.alloc().initWithFrame_(((0, screen_frame.size.height/2 + 100), (screen_frame.size.width, 100)))
         title.setStringValue_("TIME FOR A BREAK")
         title.setFont_(NSFont.boldSystemFontOfSize_(64))
@@ -140,7 +95,6 @@ class BreakView(NSObject):
         title.setAlignment_(NSCenterTextAlignment)
         content_view.addSubview_(title)
 
-        # Break Timer Label
         self.break_timer_label = NSTextField.alloc().initWithFrame_(((0, screen_frame.size.height/2 + 40), (screen_frame.size.width, 40)))
         self.break_timer_label.setStringValue_("Required Inactivity: --s")
         self.break_timer_label.setFont_(NSFont.systemFontOfSize_(24))
@@ -151,7 +105,6 @@ class BreakView(NSObject):
         self.break_timer_label.setAlignment_(NSCenterTextAlignment)
         content_view.addSubview_(self.break_timer_label)
 
-        # Instruction
         inst = NSTextField.alloc().initWithFrame_(((0, screen_frame.size.height/2 - 40), (screen_frame.size.width, 60)))
         inst.setStringValue_("Look away from the screen.\nAny movement will reset the timer.")
         inst.setFont_(NSFont.systemFontOfSize_(18))
@@ -162,7 +115,6 @@ class BreakView(NSObject):
         inst.setAlignment_(NSCenterTextAlignment)
         content_view.addSubview_(inst)
 
-        # Password Field
         field_width = 300
         self.password_field = NSSecureTextField.alloc().initWithFrame_(
             ((screen_frame.size.width/2 - field_width/2, screen_frame.size.height/2 - 150), (field_width, 40))
@@ -191,84 +143,3 @@ class BreakView(NSObject):
     def onPasswordSubmit_(self, sender):
         password = sender.stringValue()
         self.controller.onPasswordSubmit_(password)
-
-# ==========================================
-# CONTROLLER: Orchestration
-# ==========================================
-class BreakController(NSObject):
-    def initWithModel_(self, model):
-        self = super().init()
-        if self:
-            self.model = model
-            self.view = BreakView.alloc().initWithController_(self)
-            self.main_tick_timer = None
-        return self
-
-    def start(self):
-        self.model.start_work()
-        self.view.showStatusWindow()
-        # Single timer to handle all updates (1Hz)
-        self.main_tick_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            1.0, self, "tick:", None, True
-        )
-
-    def tick_(self, timer):
-        if self.model.is_break_active:
-            # Handle Break Logic
-            rem = int(self.model.get_remaining_break_time())
-            self.view.updateBreakTimer_(f"Required Inactivity: {rem}s")
-            
-            if self.model.is_break_complete():
-                print(f"[{time.strftime('%H:%M:%S')}] Break complete.")
-                self.endBreak()
-        else:
-            # Handle Work Logic
-            rem = int(self.model.get_remaining_work_time())
-            mins, secs = divmod(rem, 60)
-            self.view.updateWorkTimer_(f"Screen Time: {mins:02d}:{secs:02d}")
-            
-            if rem <= 0:
-                self.triggerBreak()
-
-    def triggerBreak(self):
-        print(f"[{time.strftime('%H:%M:%S')}] Break time triggered!")
-        self.model.start_break()
-        self.view.showOverlay()
-
-    def onPasswordSubmit_(self, password):
-        if self.model.validate_password(password):
-            print(f"[{time.strftime('%H:%M:%S')}] Password bypass used.")
-            self.endBreak()
-        else:
-            self.view.password_field.setStringValue_("")
-
-    def endBreak(self):
-        self.model.start_work()
-        self.view.hideOverlay()
-        self.view.showStatusWindow()
-
-    def handleEvent_(self, event):
-        if self.model.is_break_active:
-            self.model.reset_activity_timer()
-
-class AppDelegate(NSObject):
-    def applicationDidFinishLaunching_(self, notification):
-        self.model = BreakModel()
-        self.controller = BreakController.alloc().initWithModel_(self.model)
-        
-        from AppKit import NSEvent, NSEventMaskAny
-        self.monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
-            NSEventMaskAny, self.handleEvent_
-        )
-        
-        self.controller.start()
-
-    def handleEvent_(self, event):
-        self.controller.handleEvent_(event)
-        return event
-
-if __name__ == "__main__":
-    app = NSApplication.sharedApplication()
-    delegate = AppDelegate.alloc().init()
-    app.setDelegate_(delegate)
-    AppHelper.runEventLoop()
