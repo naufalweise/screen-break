@@ -65,12 +65,15 @@ class BreakController(NSObject):
         user_interaction_events = (1, 2, 3, 5, 6, 7, 10, 22)
 
         event_type = event.type()
-        if event_type not in user_interaction_events:
-            return
+        if event_type in user_interaction_events:
+            self.handleUserActivity()
 
+       
+    def handleUserActivity(self):
         if self.model.is_break_active:
             self.model.reset_activity_timer()
         elif self.model.is_waiting_for_return:
             # User has returned, start the work clock
             print(f"[{time.strftime('%H:%M:%S')}] User returned. Work cycle started.")
             self.model.start_work()
+        
