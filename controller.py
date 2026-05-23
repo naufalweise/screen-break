@@ -56,6 +56,18 @@ class BreakController(NSObject):
         self.view.showStatusWindow()
 
     def handleEvent_(self, event):
+        # Whitelist of explicit user interaction event types:
+        # 10: KeyDown
+        # 1, 2, 3: Mouse Down (Left, Right, Other)
+        # 5: Mouse Moved
+        # 6, 7: Mouse Dragged (Left, Right)
+        # 22: Scroll Wheel
+        user_interaction_events = (1, 2, 3, 5, 6, 7, 10, 22)
+
+        event_type = event.type()
+        if event_type not in user_interaction_events:
+            return
+
         if self.model.is_break_active:
             self.model.reset_activity_timer()
         elif self.model.is_waiting_for_return:

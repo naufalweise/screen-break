@@ -9,8 +9,14 @@ class AppDelegate(NSObject):
         self.model = BreakModel()
         self.controller = BreakController.alloc().initWithModel_(self.model)
         
-        # Global local event monitor
-        self.monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+        # Local monitor for when the app is focused
+        from AppKit import NSEvent, NSEventMaskAny
+        self.local_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskAny, self.handleEvent_
+        )
+        
+        # Global monitor for when the app is NOT focused (detect activity in other apps)
+        self.global_monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
             NSEventMaskAny, self.handleEvent_
         )
         
